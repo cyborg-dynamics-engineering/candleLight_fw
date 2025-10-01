@@ -176,19 +176,32 @@ bool can_is_rx_pending(can_data_t *channel)
 	return ((can->RF0R & CAN_RF0R_FMP0) != 0);
 }
 
+#ifdef CANDLE_HW_TIMESTAMP
+bool can_receive(can_data_t *channel, struct gs_host_frame *rx_frame,
+                                uint64_t *hw_timestamp)
+#else
 bool can_receive(can_data_t *channel, struct gs_host_frame *rx_frame)
+#endif
 {
-	CAN_TypeDef *can = channel->instance;
+        CAN_TypeDef *can = channel->instance;
 
-	if (can_is_rx_pending(channel)) {
-		CAN_FIFOMailBox_TypeDef *fifo = &can->sFIFOMailBox[0];
+        if (can_is_rx_pending(channel)) {
+                CAN_FIFOMailBox_TypeDef *fifo = &can->sFIFOMailBox[0];
 
-		rx_frame->classic_can_ts->timestamp_us = timer_get();
+#ifdef CANDLE_HW_TIMESTAMP
+                uint64_t timestamp = timer_get_timestamp();
+                if (hw_timestamp) {
+                        *hw_timestamp = timestamp;
+                }
+                rx_frame->classic_can_ts->timestamp_us = 0;
+#else
+                rx_frame->classic_can_ts->timestamp_us = timer_get();
+#endif
 
-		if (fifo->RIR &  CAN_RI0R_IDE) {
-			rx_frame->can_id = CAN_EFF_FLAG | ((fifo->RIR >> 3) & 0x1FFFFFFF);
-		} else {
-			rx_frame->can_id = (fifo->RIR >> 21) & 0x7FF;
+                if (fifo->RIR &  CAN_RI0R_IDE) {
+                        rx_frame->can_id = CAN_EFF_FLAG | ((fifo->RIR >> 3) & 0x1FFFFFFF);
+                } else {
+                        rx_frame->can_id = (fifo->RIR >> 21) & 0x7FF;
 		}
 
 		if (fifo->RIR & CAN_RI0R_RTR)  {

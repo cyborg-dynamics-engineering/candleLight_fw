@@ -225,9 +225,9 @@ static const struct gs_device_config USBD_GS_CAN_dconf = {
 
 static inline uint8_t USBD_GS_CAN_PrepareReceive(USBD_HandleTypeDef *pdev)
 {
-	USBD_GS_CAN_HandleTypeDef *hcan = (USBD_GS_CAN_HandleTypeDef*)pdev->pClassData;
-	struct gs_host_frame *frame = &hcan->from_host_buf->frame;
-	uint16_t size;
+        USBD_GS_CAN_HandleTypeDef *hcan = (USBD_GS_CAN_HandleTypeDef*)pdev->pClassData;
+        struct gs_host_frame *frame = &hcan->from_host_buf->frame;
+        uint16_t size;
 
 	if (IS_ENABLED(CONFIG_CANFD)) {
 		size = struct_size(frame, canfd_ts, 1);
@@ -235,8 +235,38 @@ static inline uint8_t USBD_GS_CAN_PrepareReceive(USBD_HandleTypeDef *pdev)
 		size = struct_size(frame, classic_can_ts, 1);
 	}
 
-	return USBD_LL_PrepareReceive(pdev, GSUSB_ENDPOINT_OUT, (uint8_t *)frame, size);
+        return USBD_LL_PrepareReceive(pdev, GSUSB_ENDPOINT_OUT, (uint8_t *)frame, size);
 }
+
+#ifdef CANDLE_HW_TIMESTAMP
+static void USBD_GS_CAN_PrepareTimestamp(USBD_GS_CAN_HandleTypeDef *hcan,
+                                                                         struct gs_host_frame_object *obj)
+{
+        struct gs_host_frame *frame = &obj->frame;
+        uint32_t timestamp_us = timer_timestamp_to_us32(obj->hw_timestamp);
+
+        if (hcan->timestamps_enabled) {
+                if (IS_ENABLED(CONFIG_CANFD) && frame->flags & GS_CAN_FLAG_FD) {
+                        frame->canfd_ts->timestamp_us = timestamp_us;
+                } else {
+                        frame->classic_can_ts->timestamp_us = timestamp_us;
+                }
+        } else {
+                if (IS_ENABLED(CONFIG_CANFD) && frame->flags & GS_CAN_FLAG_FD) {
+                        frame->canfd_ts->timestamp_us = 0;
+                } else {
+                        frame->classic_can_ts->timestamp_us = 0;
+                }
+        }
+}
+#else
+static inline void USBD_GS_CAN_PrepareTimestamp(USBD_GS_CAN_HandleTypeDef *hcan,
+                                                                                struct gs_host_frame_object *obj)
+{
+        (void)hcan;
+        (void)obj;
+}
+#endif
 
 static uint8_t USBD_GS_CAN_Start(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 {
@@ -346,14 +376,19 @@ static uint8_t USBD_GS_CAN_Config_Request(USBD_HandleTypeDef *pdev, USBD_SetupRe
 			src = &CAN_btconst;
 			len = sizeof(CAN_btconst);
 			break;
-		case GS_USB_BREQ_DEVICE_CONFIG:
-			src = &USBD_GS_CAN_dconf;
-			len = sizeof(USBD_GS_CAN_dconf);
-			break;
-		case GS_USB_BREQ_TIMESTAMP:
-			src = &hcan->sof_timestamp_us;
-			len = sizeof(hcan->sof_timestamp_us);
-			break;
+                case GS_USB_BREQ_DEVICE_CONFIG:
+                        src = &USBD_GS_CAN_dconf;
+                        len = sizeof(USBD_GS_CAN_dconf);
+                        break;
+                case GS_USB_BREQ_TIMESTAMP:
+#ifdef CANDLE_HW_TIMESTAMP
+                        hcan->sof_timestamp_us = timer_timestamp_to_us32(timer_get_timestamp());
+#else
+                        hcan->sof_timestamp_us = timer_get();
+#endif
+                        src = &hcan->sof_timestamp_us;
+                        len = sizeof(hcan->sof_timestamp_us);
+                        break;
 		case GS_USB_BREQ_IDENTIFY:
 			len = sizeof(struct gs_identify_mode);
 			break;
@@ -640,9 +675,13 @@ out_prepare_receive:
 
 static uint8_t USBD_GS_CAN_SOF(struct _USBD_HandleTypeDef *pdev)
 {
-	USBD_GS_CAN_HandleTypeDef *hcan = (USBD_GS_CAN_HandleTypeDef*) pdev->pClassData;
-	hcan->sof_timestamp_us = timer_get();
-	return USBD_OK;
+        USBD_GS_CAN_HandleTypeDef *hcan = (USBD_GS_CAN_HandleTypeDef*) pdev->pClassData;
+#ifdef CANDLE_HW_TIMESTAMP
+        hcan->sof_timestamp_us = timer_timestamp_to_us32(timer_get_timestamp());
+#else
+        hcan->sof_timestamp_us = timer_get();
+#endif
+        return USBD_OK;
 }
 
 static uint8_t *USBD_GS_CAN_GetCfgDesc(uint16_t *len)
@@ -828,12 +867,14 @@ void USBD_GS_CAN_SendToHost(USBD_HandleTypeDef *pdev)
 		return;
 	}
 
-	list_del(&hcan->to_host_buf->list);
-	restore_irq(was_irq_enabled);
+        list_del(&hcan->to_host_buf->list);
+        restore_irq(was_irq_enabled);
 
-	uint8_t result = USBD_GS_CAN_SendFrame(pdev, &hcan->to_host_buf->frame);
-	if (result == USBD_OK)
-		return;
+        USBD_GS_CAN_PrepareTimestamp(hcan, hcan->to_host_buf);
+
+        uint8_t result = USBD_GS_CAN_SendFrame(pdev, &hcan->to_host_buf->frame);
+        if (result == USBD_OK)
+                return;
 
 	was_irq_enabled = disable_irq();
 	list_add(&hcan->to_host_buf->list, &hcan->list_frame_pool);

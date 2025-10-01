@@ -40,6 +40,13 @@ THE SOFTWARE.
 
 #include "version.h"
 
+/*
+ * Enable candleLight hardware timestamp support.  All timestamp related code
+ * is conditionally compiled behind this symbol so it can be turned off for
+ * exceptionally resource constrained builds.
+ */
+#define CANDLE_HW_TIMESTAMP 1
+
 #define CAN_QUEUE_SIZE				 (64 * NUM_CAN_CHANNEL)
 
 #define USBD_VID					 0x1d50
