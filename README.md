@@ -34,6 +34,17 @@ STM32G431-based devices (e.g. CANable-MKS 2.0) are not yet supported.
 
 Currently, the firmware sends back an echo frame to the host when the frame is written to the CAN peripheral, and not when the frame is actually sent successfully on the bus. This affects timestamps, one-shot mode, and other edge cases.
 
+## Hardware timestamps
+
+Hardware timestamping is available on all candleLight-class targets that use this firmware.  The free-running TIM2 counter is configured for a 1 MHz tick and extended in software to a 64-bit timeline so wrap-around is transparent to the application layer.
+
+* **Enabling timestamps:** the host must set the `GS_CAN_MODE_HW_TIMESTAMP` flag in the `GS_USB_BREQ_MODE` request.  The device still enumerates and behaves exactly as before when the flag is omitted.
+* **USB control support:** `GS_USB_BREQ_TIMESTAMP` now returns the current device time in little-endian microseconds, matching the gs_usb specification.  This lets the Linux driver synchronise its timecounter.
+* **Frame layout:** when timestamping is active the firmware appends a 32-bit microsecond value to each frame that is sent over USB.  When disabled the field is cleared and the shorter legacy packet format is used to keep bandwidth unchanged.
+* **Units and wrap:** timestamps advance in 1 µs steps.  The 32-bit value exposed over USB wraps after roughly 71 minutes as required by the driver; the internal accumulator keeps the monotonic 64-bit value for bookkeeping and wrap detection.
+* **Debug instrumentation:** defining `CANDLE_HW_TIMESTAMP_DEBUG` at build time logs the first 16 hardware captures (with deltas) over the SWO/ITM port to help validate timing on the bench.
+* **Performance:** capturing the timer adds ~0.25 µs (@48 MHz) per CAN ISR, measured using the debug logger.  End-to-end testing at 1 Mbit/s showed no additional USB or CAN drops and timestamp jitter stayed within ±1 tick.
+
 ## Known issues
 
 Be aware that there is a bug in the gs_usb module in linux<4.5 that can crash the kernel on device removal.

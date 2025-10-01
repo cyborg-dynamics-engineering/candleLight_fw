@@ -70,7 +70,12 @@ void can_enable(can_data_t *channel, uint32_t mode);
 void can_disable(can_data_t *channel);
 bool can_is_enabled(can_data_t *channel);
 
+#ifdef CANDLE_HW_TIMESTAMP
+bool can_receive(can_data_t *channel, struct gs_host_frame *rx_frame,
+                                uint64_t *hw_timestamp);
+#else
 bool can_receive(can_data_t *channel, struct gs_host_frame *rx_frame);
+#endif
 bool can_is_rx_pending(can_data_t *channel);
 
 bool can_send(can_data_t *channel, struct gs_host_frame *frame);

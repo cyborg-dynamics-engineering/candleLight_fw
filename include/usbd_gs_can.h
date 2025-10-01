@@ -64,11 +64,14 @@ extern USBD_ClassTypeDef USBD_GS_CAN;
 #endif
 
 struct gs_host_frame_object {
-	struct list_head list;
-	union {
-		uint8_t _buf[GS_HOST_FRAME_SIZE];
-		struct gs_host_frame frame;
-	};
+        struct list_head list;
+#ifdef CANDLE_HW_TIMESTAMP
+        uint64_t hw_timestamp;
+#endif
+        union {
+                uint8_t _buf[GS_HOST_FRAME_SIZE];
+                struct gs_host_frame frame;
+        };
 };
 
 typedef struct {

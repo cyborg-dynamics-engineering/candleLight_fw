@@ -30,3 +30,9 @@ THE SOFTWARE.
 
 void timer_init(void);
 uint32_t timer_get(void);
+
+#ifdef CANDLE_HW_TIMESTAMP
+uint64_t timer_get_timestamp(void);
+uint32_t timer_timestamp_to_us32(uint64_t timestamp);
+uint64_t timer_ticks_to_ns(uint64_t ticks);
+#endif

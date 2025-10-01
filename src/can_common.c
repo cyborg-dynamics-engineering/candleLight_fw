@@ -68,21 +68,30 @@ void CAN_SendFrame(USBD_GS_CAN_HandleTypeDef *hcan, can_data_t *channel)
 
 	struct gs_host_frame *frame = &frame_object->frame;
 
-	if (!can_send(channel, frame)) {
-		list_add_locked(&frame_object->list, &channel->list_from_host);
-		return;
-	}
+        if (!can_send(channel, frame)) {
+                list_add_locked(&frame_object->list, &channel->list_from_host);
+                return;
+        }
 
-	// Echo sent frame back to host
-	frame->reserved = 0x0;
-	if (IS_ENABLED(CONFIG_CANFD) && frame->flags & GS_CAN_FLAG_FD)
-		frame->canfd_ts->timestamp_us = timer_get();
-	else
-		frame->classic_can_ts->timestamp_us = timer_get();
+        // Echo sent frame back to host
+        frame->reserved = 0x0;
+#ifdef CANDLE_HW_TIMESTAMP
+        frame_object->hw_timestamp = timer_get_timestamp();
+        if (IS_ENABLED(CONFIG_CANFD) && frame->flags & GS_CAN_FLAG_FD) {
+                frame->canfd_ts->timestamp_us = 0;
+        } else {
+                frame->classic_can_ts->timestamp_us = 0;
+        }
+#else
+        if (IS_ENABLED(CONFIG_CANFD) && frame->flags & GS_CAN_FLAG_FD)
+                frame->canfd_ts->timestamp_us = timer_get();
+        else
+                frame->classic_can_ts->timestamp_us = timer_get();
+#endif
 
-	list_add_tail_locked(&frame_object->list, &hcan->list_to_host);
+        list_add_tail_locked(&frame_object->list, &hcan->list_to_host);
 
-	led_indicate_trx(&channel->leds, LED_TX);
+        led_indicate_trx(&channel->leds, LED_TX);
 }
 
 void CAN_ReceiveFrame(USBD_GS_CAN_HandleTypeDef *hcan, can_data_t *channel)
@@ -107,17 +116,21 @@ void CAN_ReceiveFrame(USBD_GS_CAN_HandleTypeDef *hcan, can_data_t *channel)
 
 	struct gs_host_frame *frame = &frame_object->frame;
 
-	if (!can_receive(channel, frame)) {
-		list_add_tail_locked(&frame_object->list, &hcan->list_frame_pool);
-		return;
-	}
+#ifdef CANDLE_HW_TIMESTAMP
+        if (!can_receive(channel, frame, &frame_object->hw_timestamp)) {
+#else
+        if (!can_receive(channel, frame)) {
+#endif
+                list_add_tail_locked(&frame_object->list, &hcan->list_frame_pool);
+                return;
+        }
 
-	frame->echo_id = 0xFFFFFFFF; // not an echo frame
-	frame->reserved = 0;
+        frame->echo_id = 0xFFFFFFFF; // not an echo frame
+        frame->reserved = 0;
 
-	list_add_tail_locked(&frame_object->list, &hcan->list_to_host);
+        list_add_tail_locked(&frame_object->list, &hcan->list_to_host);
 
-	led_indicate_trx(&channel->leds, LED_RX);
+        led_indicate_trx(&channel->leds, LED_RX);
 }
 
 // If there are frames to receive, don't report any error frames. The
@@ -146,13 +159,18 @@ void CAN_HandleError(USBD_GS_CAN_HandleTypeDef *hcan, can_data_t *channel)
 	list_del(&frame_object->list);
 	restore_irq(was_irq_enabled);
 
-	struct gs_host_frame *frame = &frame_object->frame;
-	frame->classic_can_ts->timestamp_us = timer_get();
-	frame->channel = channel->nr;
+        struct gs_host_frame *frame = &frame_object->frame;
+#ifdef CANDLE_HW_TIMESTAMP
+        frame_object->hw_timestamp = timer_get_timestamp();
+        frame->classic_can_ts->timestamp_us = 0;
+#else
+        frame->classic_can_ts->timestamp_us = timer_get();
+#endif
+        frame->channel = channel->nr;
 
-	if (can_parse_error_status(channel, frame, can_err)) {
-		list_add_tail_locked(&frame_object->list, &hcan->list_to_host);
-	} else {
+        if (can_parse_error_status(channel, frame, can_err)) {
+                list_add_tail_locked(&frame_object->list, &hcan->list_to_host);
+        } else {
 		list_add_tail_locked(&frame_object->list, &hcan->list_frame_pool);
 	}
 }
